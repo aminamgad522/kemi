@@ -243,12 +243,19 @@ class ETAInvoiceExporter {
   }
   
   async sendMessageWithRetry(tabId, message, maxRetries = 3) {
+    console.log(`Sending message (attempt 1/${maxRetries}):`, message.action);
+    
     for (let i = 0; i < maxRetries; i++) {
       try {
+        if (i > 0) {
+          console.log(`Retry attempt ${i + 1}/${maxRetries} for:`, message.action);
+        }
+        
         const response = await chrome.tabs.sendMessage(tabId, message);
+        console.log(`Message response for ${message.action}:`, response);
         return response;
       } catch (error) {
-        console.log(`Message attempt ${i + 1} failed:`, error);
+        console.log(`Message attempt ${i + 1}/${maxRetries} failed:`, error);
         
         if (i === maxRetries - 1) {
           // Last attempt failed
@@ -259,7 +266,7 @@ class ETAInvoiceExporter {
         }
         
         // Wait before retry
-        await new Promise(resolve => setTimeout(resolve, 500 * (i + 1)));
+        await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
         
         // Try to ensure content script is loaded again
         try {
@@ -357,20 +364,30 @@ class ETAInvoiceExporter {
   
   async exportAllPages(format, options) {
     this.showProgress();
-    this.showStatus('جاري تحميل جميع الصفحات...', 'loading');
+    this.showStatus(`جاري تحميل جميع الصفحات (${this.totalPages} صفحة)...`, 'loading');
     
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     
-    const allData = await this.sendMessageWithRetry(tab.id, { 
+    console.log('Starting all pages download...');
+    
+    const response = await this.sendMessageWithRetry(tab.id, { 
       action: 'getAllPagesData',
       options: { ...options, progressCallback: true }
-    });
+    }, 5); // Increase retry attempts
     
-    if (!allData || !allData.success) {
-      throw new Error('فشل في تحميل جميع الصفحات: ' + (allData?.error || 'خطأ غير معروف'));
+    console.log('All pages download response:', response);
+    
+    if (!response || !response.success) {
+      throw new Error('فشل في تحميل جميع الصفحات: ' + (response?.error || 'خطأ غير معروف'));
     }
     
-    let dataToExport = allData.data;
+    let dataToExport = response.data || [];
+    
+    if (dataToExport.length === 0) {
+      throw new Error('لم يتم العثور على أي فواتير في جميع الصفحات');
+    }
+    
+    console.log(`Successfully loaded ${dataToExport.length} invoices from all pages`);
     
     if (options.downloadDetails && dataToExport.length > 0) {
       this.updateProgress({
@@ -389,7 +406,7 @@ class ETAInvoiceExporter {
     });
     
     await this.generateFile(dataToExport, format, options);
-    this.showStatus(`تم تصدير ${dataToExport.length} فاتورة من جميع الصفحات بنجاح!`, 'success');
+    this.showStatus(`تم تصدير ${dataToExport.length} فاتورة من ${this.totalPages} صفحة بنجاح!`, 'success');
   }
   
   showProgress() {
@@ -406,7 +423,7 @@ class ETAInvoiceExporter {
       return;
     }
     
-    const percentage = progress.percentage || (progress.totalPages > 0 ? (progress.currentPage / progress.totalPages) * 100 : 0);
+    const percentage = Math.min(progress.percentage || (progress.totalPages > 0 ? (progress.currentPage / progress.totalPages) * 100 : 0), 100);
     
     const progressFill = this.elements.progressBar.querySelector('.progress-fill');
     if (progressFill) {
@@ -414,7 +431,16 @@ class ETAInvoiceExporter {
     }
     
     if (this.elements.progressText) {
-      this.elements.progressText.textContent = progress.message || `الصفحة ${progress.currentPage} من ${progress.totalPages} (${Math.round(percentage)}%)`;
+      const defaultMessage = `الصفحة ${progress.currentPage || 0} من ${progress.totalPages || 0} (${Math.round(percentage)}%)`;
+      this.elements.progressText.textContent = progress.message || defaultMessage;
+    }
+    
+    console.log('Progress updated:', {
+      percentage: Math.round(percentage),
+      message: progress.message,
+      currentPage: progress.currentPage,
+      totalPages: progress.totalPages
+    });
     }
   }
   
