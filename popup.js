@@ -181,10 +181,39 @@ class ETAInvoiceExporter {
         return;
       }
       
+      // Ensure content script is loaded
+      await this.ensureContentScriptLoaded(tab.id);
+      
       await this.loadInvoiceData();
     } catch (error) {
       this.showStatus('خطأ في فحص الصفحة الحالية', 'error');
       console.error('Error:', error);
+    }
+  }
+  
+  async ensureContentScriptLoaded(tabId) {
+    try {
+      // Try to ping the content script
+      await chrome.tabs.sendMessage(tabId, { action: 'ping' });
+    } catch (error) {
+      // Content script not loaded, inject it
+      console.log('Content script not found, injecting...');
+      
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: tabId },
+          files: ['content.js']
+        });
+        
+        // Wait a bit for the script to initialize
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Try to ping again
+        await chrome.tabs.sendMessage(tabId, { action: 'ping' });
+        console.log('Content script successfully injected and ready');
+      } catch (injectError) {
+        throw new Error('فشل في تحميل المكونات المطلوبة. يرجى إعادة تحميل الصفحة.');
+      }
     }
   }
   
@@ -193,7 +222,7 @@ class ETAInvoiceExporter {
       this.showStatus('جاري تحميل بيانات الفواتير...', 'loading');
       
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      const response = await chrome.tabs.sendMessage(tab.id, { action: 'getInvoiceData' });
+      const response = await this.sendMessageWithRetry(tab.id, { action: 'getInvoiceData' });
       
       if (!response || !response.success) {
         throw new Error('فشل في الحصول على بيانات الفواتير');
@@ -210,6 +239,35 @@ class ETAInvoiceExporter {
     } catch (error) {
       this.showStatus('خطأ في تحميل البيانات: ' + error.message, 'error');
       console.error('Load error:', error);
+    }
+  }
+  
+  async sendMessageWithRetry(tabId, message, maxRetries = 3) {
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        const response = await chrome.tabs.sendMessage(tabId, message);
+        return response;
+      } catch (error) {
+        console.log(`Message attempt ${i + 1} failed:`, error);
+        
+        if (i === maxRetries - 1) {
+          // Last attempt failed
+          if (error.message.includes('Could not establish connection')) {
+            throw new Error('فشل في الاتصال مع الصفحة. يرجى إعادة تحميل الصفحة والمحاولة مرة أخرى.');
+          }
+          throw error;
+        }
+        
+        // Wait before retry
+        await new Promise(resolve => setTimeout(resolve, 500 * (i + 1)));
+        
+        // Try to ensure content script is loaded again
+        try {
+          await this.ensureContentScriptLoaded(tabId);
+        } catch (ensureError) {
+          console.warn('Failed to ensure content script:', ensureError);
+        }
+      }
     }
   }
   
@@ -284,11 +342,13 @@ class ETAInvoiceExporter {
   async exportCurrentPage(format, options) {
     this.showStatus('جاري تصدير الصفحة الحالية...', 'loading');
     
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    
     let dataToExport = [...this.invoiceData];
     
     if (options.downloadDetails) {
       this.showStatus('جاري تحميل تفاصيل الفواتير...', 'loading');
-      dataToExport = await this.loadInvoiceDetails(dataToExport);
+      dataToExport = await this.loadInvoiceDetails(dataToExport, tab.id);
     }
     
     await this.generateFile(dataToExport, format, options);
@@ -301,7 +361,7 @@ class ETAInvoiceExporter {
     
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     
-    const allData = await chrome.tabs.sendMessage(tab.id, { 
+    const allData = await this.sendMessageWithRetry(tab.id, { 
       action: 'getAllPagesData',
       options: { ...options, progressCallback: true }
     });
@@ -319,7 +379,7 @@ class ETAInvoiceExporter {
         message: 'جاري تحميل تفاصيل جميع الفواتير...'
       });
       
-      dataToExport = await this.loadInvoiceDetails(dataToExport);
+      dataToExport = await this.loadInvoiceDetails(dataToExport, tab.id);
     }
     
     this.updateProgress({
@@ -358,7 +418,7 @@ class ETAInvoiceExporter {
     }
   }
   
-  async loadInvoiceDetails(invoices) {
+  async loadInvoiceDetails(invoices, tabId) {
     const detailedInvoices = [];
     const batchSize = 2;
     
@@ -369,8 +429,7 @@ class ETAInvoiceExporter {
         this.showStatus(`جاري تحميل تفاصيل الفاتورة ${globalIndex + 1} من ${invoices.length}...`, 'loading');
         
         try {
-          const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-          const detailResponse = await chrome.tabs.sendMessage(tab.id, {
+          const detailResponse = await this.sendMessageWithRetry(tabId, {
             action: 'getInvoiceDetails',
             invoiceId: invoice.electronicNumber
           });

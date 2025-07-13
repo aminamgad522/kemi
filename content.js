@@ -704,6 +704,10 @@ const etaContentScript = new ETAContentScript();
 // Listen for messages from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   switch (request.action) {
+    case 'ping':
+      sendResponse({ success: true, message: 'Content script is ready' });
+      break;
+      
     case 'getInvoiceData':
       sendResponse({
         success: true,
