@@ -21,11 +21,10 @@ class ETAInvoiceExporter {
       jsonBtn: document.getElementById('jsonBtn'),
       excelBtn: document.getElementById('excelBtn'),
       pdfBtn: document.getElementById('pdfBtn'),
-      progressContainer: null, // Will be created dynamically
+      progressContainer: null,
       progressBar: null,
       progressText: null,
       checkboxes: {
-        // Complete mapping of all checkboxes based on the images
         serialNumber: document.getElementById('option-serial-number'),
         detailsButton: document.getElementById('option-details-button'),
         documentType: document.getElementById('option-document-type'),
@@ -52,7 +51,6 @@ class ETAInvoiceExporter {
         electronicSignature: document.getElementById('option-electronic-signature'),
         foodDrugGuide: document.getElementById('option-food-drug-guide'),
         externalLink: document.getElementById('option-external-link'),
-        // Special options
         downloadDetails: document.getElementById('option-download-details'),
         combineAll: document.getElementById('option-combine-all'),
         downloadAll: document.getElementById('option-download-all'),
@@ -64,7 +62,6 @@ class ETAInvoiceExporter {
   }
   
   createProgressElements() {
-    // Create progress container
     this.elements.progressContainer = document.createElement('div');
     this.elements.progressContainer.className = 'progress-container';
     this.elements.progressContainer.style.cssText = `
@@ -76,7 +73,6 @@ class ETAInvoiceExporter {
       display: none;
     `;
     
-    // Create progress bar
     this.elements.progressBar = document.createElement('div');
     this.elements.progressBar.className = 'progress-bar';
     this.elements.progressBar.style.cssText = `
@@ -102,7 +98,6 @@ class ETAInvoiceExporter {
     
     this.elements.progressBar.appendChild(progressFill);
     
-    // Create progress text
     this.elements.progressText = document.createElement('div');
     this.elements.progressText.className = 'progress-text';
     this.elements.progressText.style.cssText = `
@@ -112,11 +107,9 @@ class ETAInvoiceExporter {
       font-weight: 500;
     `;
     
-    // Assemble progress container
     this.elements.progressContainer.appendChild(this.elements.progressBar);
     this.elements.progressContainer.appendChild(this.elements.progressText);
     
-    // Add to DOM
     const statusElement = this.elements.status;
     statusElement.parentNode.insertBefore(this.elements.progressContainer, statusElement.nextSibling);
   }
@@ -127,7 +120,6 @@ class ETAInvoiceExporter {
     this.elements.jsonBtn.addEventListener('click', () => this.handleExport('json'));
     this.elements.pdfBtn.addEventListener('click', () => this.handleExport('pdf'));
     
-    // Add listener for download all checkbox
     if (this.elements.checkboxes.downloadAll) {
       this.elements.checkboxes.downloadAll.addEventListener('change', (e) => {
         if (e.target.checked) {
@@ -136,7 +128,6 @@ class ETAInvoiceExporter {
       });
     }
 
-    // Add listener for select all checkbox
     if (this.elements.checkboxes.selectAll) {
       this.elements.checkboxes.selectAll.addEventListener('change', (e) => {
         this.toggleAllCheckboxes(e.target.checked);
@@ -145,7 +136,6 @@ class ETAInvoiceExporter {
   }
 
   toggleAllCheckboxes(checked) {
-    // Toggle all field checkboxes except special options
     const fieldCheckboxes = [
       'serialNumber', 'detailsButton', 'documentType', 'documentVersion', 'status',
       'issueDate', 'submissionDate', 'invoiceCurrency', 'invoiceValue', 'vatAmount',
@@ -164,7 +154,6 @@ class ETAInvoiceExporter {
   }
   
   setupProgressListener() {
-    // Listen for progress updates from content script
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message.action === 'progressUpdate') {
         this.updateProgress(message.progress);
@@ -232,7 +221,6 @@ class ETAInvoiceExporter {
       this.elements.totalCountText.textContent = this.totalCount;
     }
     
-    // Update download all option text
     const downloadAllLabel = this.elements.checkboxes.downloadAll?.parentElement.querySelector('label');
     if (downloadAllLabel) {
       downloadAllLabel.innerHTML = `تحميل جميع الصفحات - <span id="totalCountText">${this.totalCount}</span> فاتورة (${this.totalPages} صفحة)`;
@@ -246,7 +234,6 @@ class ETAInvoiceExporter {
       if (checkbox) {
         options[key] = checkbox.checked;
       } else {
-        console.warn(`Checkbox not found: ${key}`);
         options[key] = false;
       }
     });
@@ -314,7 +301,6 @@ class ETAInvoiceExporter {
     
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     
-    // Send message to content script to process all pages
     const allData = await chrome.tabs.sendMessage(tab.id, { 
       action: 'getAllPagesData',
       options: { ...options, progressCallback: true }
@@ -374,9 +360,8 @@ class ETAInvoiceExporter {
   
   async loadInvoiceDetails(invoices) {
     const detailedInvoices = [];
-    const batchSize = 3; // Reduced batch size for better performance
+    const batchSize = 2;
     
-    // Process invoices in batches to avoid overwhelming the server
     for (let i = 0; i < invoices.length; i += batchSize) {
       const batch = invoices.slice(i, i + batchSize);
       const batchPromises = batch.map(async (invoice, batchIndex) => {
@@ -404,13 +389,11 @@ class ETAInvoiceExporter {
         }
       });
       
-      // Wait for current batch to complete
       const batchResults = await Promise.all(batchPromises);
       detailedInvoices.push(...batchResults);
       
-      // Small delay between batches to avoid rate limiting
       if (i + batchSize < invoices.length) {
-        await new Promise(resolve => setTimeout(resolve, 300));
+        await new Promise(resolve => setTimeout(resolve, 200));
       }
     }
     
@@ -434,10 +417,10 @@ class ETAInvoiceExporter {
   generateExcelFileWithCorrectLayout(data, options) {
     const wb = XLSX.utils.book_new();
     
-    // Create main summary sheet with the exact layout from the screenshot
-    this.createMainSheetWithCorrectLayout(wb, data, options);
+    // Create main sheet with exact layout from images
+    this.createMainSheetWithExactLayout(wb, data, options);
     
-    // Create details sheets for each invoice if requested
+    // Create details sheets if requested
     if (options.downloadDetails) {
       this.createDetailsSheetsWithLinks(wb, data, options);
     }
@@ -452,43 +435,67 @@ class ETAInvoiceExporter {
     XLSX.writeFile(wb, filename);
   }
   
-  createMainSheetWithCorrectLayout(wb, data, options) {
-    // Headers based on the exact layout from the screenshot (left to right as shown)
+  createMainSheetWithExactLayout(wb, data, options) {
+    // Headers exactly as shown in the images (right to left)
     const headers = [
-      'تسلسل',           // A - Serial number
-      'عرض',             // B - View button
-      'نوع الفاتورة',     // C - Invoice type
-      'إصدار',           // D - Version
-      'الحالة',          // E - Status
-      'تاريخ الإصدار',    // F - Issue date
-      'تاريخ التقديم',    // G - Submission date
-      'عملة الفاتورة',    // H - Currency
-      'قيمة الفاتورة',    // I - Invoice value
-      'ضريبة القيمة المضافة', // J - VAT
-      'الخصم تحت حساب الضريبة', // K - Tax discount
-      'إجمالي الفاتورة',  // L - Total
-      'الرقم الداخلي',    // M - Internal number
-      'الرقم الإلكتروني'  // N - Electronic number
+      'تسلسل',                    // A - Serial number
+      'عرض',                     // B - View button  
+      'نوع المستند',              // C - Document type
+      'نسخة المستند',             // D - Document version
+      'الحالة',                  // E - Status
+      'تاريخ الإصدار',            // F - Issue date
+      'تاريخ التقديم',            // G - Submission date
+      'عملة الفاتورة',            // H - Invoice currency
+      'قيمة الفاتورة',            // I - Invoice value
+      'ضريبة القيمة المضافة',      // J - VAT amount
+      'الخصم تحت حساب الضريبة',    // K - Tax discount
+      'إجمالي الفاتورة',          // L - Total invoice
+      'الرقم الداخلي',            // M - Internal number
+      'الرقم الإلكتروني',         // N - Electronic number
+      'الرقم الضريبي للبائع',      // O - Seller tax number
+      'اسم البائع',              // P - Seller name
+      'عنوان البائع',            // Q - Seller address
+      'الرقم الضريبي للمشتري',     // R - Buyer tax number
+      'اسم المشتري',             // S - Buyer name
+      'عنوان المشتري',           // T - Buyer address
+      'مرجع طلب الشراء',          // U - Purchase order ref
+      'وصف طلب الشراء',          // V - Purchase order desc
+      'مرجع طلب المبيعات',        // W - Sales order ref
+      'التوقيع الإلكتروني',       // X - Electronic signature
+      'دليل الغذاء والدواء',       // Y - Food drug guide
+      'الرابط الخارجي'            // Z - External link
     ];
 
     const rows = [headers];
     
     data.forEach((invoice, index) => {
       const row = [
-        index + 1,                                    // A - تسلسل
-        'عرض',                                        // B - عرض (will be converted to hyperlink)
-        invoice.documentType || 'فاتورة',             // C - نوع الفاتورة
-        invoice.documentVersion || '1.0',             // D - إصدار
-        invoice.status || '',                         // E - الحالة
-        invoice.issueDate || '',                      // F - تاريخ الإصدار
-        invoice.submissionDate || invoice.issueDate || '', // G - تاريخ التقديم
-        invoice.currency || 'EGP',                    // H - عملة الفاتورة
+        index + 1,                                           // A - تسلسل
+        'عرض',                                               // B - عرض
+        invoice.documentType || 'فاتورة',                    // C - نوع المستند
+        invoice.documentVersion || '1.0',                    // D - نسخة المستند
+        invoice.status || '',                                // E - الحالة
+        invoice.issueDate || '',                             // F - تاريخ الإصدار
+        invoice.submissionDate || invoice.issueDate || '',   // G - تاريخ التقديم
+        invoice.invoiceCurrency || 'EGP',                    // H - عملة الفاتورة
         this.formatCurrency(invoice.invoiceValue || invoice.totalAmount), // I - قيمة الفاتورة
-        this.formatCurrency(invoice.vatAmount),       // J - ضريبة القيمة المضافة
-        this.formatCurrency(invoice.taxDiscount || '0'), // K - الخصم تحت حساب الضريبة
-        this.formatCurrency(invoice.totalAmount),     // L - إجمالي الفاتورة
-        invoice.internalNumber || '',                 // M - الرقم الداخلي
-        invoice.electronicNumber || ''                // N - الرقم الإلكتروني
+        this.formatCurrency(invoice.vatAmount),              // J - ضريبة القيمة المضافة
+        this.formatCurrency(invoice.taxDiscount || '0'),     // K - الخصم تحت حساب الضريبة
+        this.formatCurrency(invoice.totalAmount),            // L - إجمالي الفاتورة
+        invoice.internalNumber || '',                        // M - الرقم الداخلي
+        invoice.electronicNumber || '',                      // N - الرقم الإلكتروني
+        invoice.sellerTaxNumber || '',                       // O - الرقم الضريبي للبائع
+        invoice.sellerName || '',                            // P - اسم البائع
+        invoice.sellerAddress || '',                         // Q - عنوان البائع
+        invoice.buyerTaxNumber || '',                        // R - الرقم الضريبي للمشتري
+        invoice.buyerName || '',                             // S - اسم المشتري
+        invoice.buyerAddress || '',                          // T - عنوان المشتري
+        invoice.purchaseOrderRef || '',                      // U - مرجع طلب الشراء
+        invoice.purchaseOrderDesc || '',                     // V - وصف طلب الشراء
+        invoice.salesOrderRef || '',                         // W - مرجع طلب المبيعات
+        invoice.electronicSignature || 'موقع إلكترونياً',    // X - التوقيع الإلكتروني
+        invoice.foodDrugGuide || '',                         // Y - دليل الغذاء والدواء
+        invoice.externalLink || ''                           // Z - الرابط الخارجي
       ];
       
       rows.push(row);
@@ -496,7 +503,7 @@ class ETAInvoiceExporter {
     
     const ws = XLSX.utils.aoa_to_sheet(rows);
     
-    // Add hyperlinks to the "عرض" column (column B) that link to detail sheets
+    // Add hyperlinks to the "عرض" column
     this.addInternalHyperlinks(ws, data);
     
     // Format the worksheet
@@ -506,21 +513,18 @@ class ETAInvoiceExporter {
   }
   
   addInternalHyperlinks(ws, data) {
-    // Add hyperlinks to the "عرض" column (column B, index 1) that link to detail sheets
     data.forEach((invoice, index) => {
-      const rowIndex = index + 2; // +2 because Excel is 1-indexed and we have a header row
-      const cellAddress = XLSX.utils.encode_cell({ r: rowIndex - 1, c: 1 }); // Column B (index 1)
+      const rowIndex = index + 2;
+      const cellAddress = XLSX.utils.encode_cell({ r: rowIndex - 1, c: 1 });
       
       if (ws[cellAddress] && invoice.electronicNumber) {
         const sheetName = `تفاصيل_${index + 1}`;
         
-        // Create internal hyperlink to the detail sheet
         ws[cellAddress].l = { 
           Target: `#'${sheetName}'!A1`, 
           Tooltip: `عرض تفاصيل الفاتورة ${invoice.internalNumber || index + 1}` 
         };
         
-        // Style the hyperlink
         ws[cellAddress].s = {
           font: { 
             color: { rgb: "0000FF" }, 
@@ -535,53 +539,53 @@ class ETAInvoiceExporter {
   
   createDetailsSheetsWithLinks(wb, data, options) {
     data.forEach((invoice, index) => {
-      // Create detail sheet for each invoice
       const sheetName = `تفاصيل_${index + 1}`;
       
-      // Headers for invoice details matching the screenshot layout (right to left)
+      // Headers for invoice details (right to left as in image)
       const detailHeaders = [
-        'اسم الصنف',                    // A - Item name (rightmost)
-        'كود الوحدة',                  // B - Unit code  
-        'اسم الوحدة',                  // C - Unit name
-        'الكمية',                     // D - Quantity
-        'السعر',                      // E - Price
-        'القيمة',                     // F - Value
-        'الضريبة',                    // G - Tax
-        'ضريبة القيمة المضافة',        // H - VAT
-        'الإجمالي'                    // I - Total (leftmost)
+        'كود الصنف',                // A - Item code
+        'الوصف',                   // B - Description
+        'كود الوحدة',              // C - Unit code
+        'اسم الوحدة',              // D - Unit name
+        'الكمية',                 // E - Quantity
+        'السعر',                  // F - Unit price
+        'القيمة',                 // G - Total value
+        'الضريبة',                // H - Tax amount
+        'ضريبة القيمة المضافة',    // I - VAT amount
+        'الإجمالي'                // J - Total with VAT
       ];
       
       const detailRows = [
-        // Invoice header information (9 columns to match headers)
-        ['معلومات الفاتورة', '', '', '', '', '', '', '', ''],
-        ['الرقم الإلكتروني:', invoice.electronicNumber || '', '', '', '', '', '', '', ''],
-        ['الرقم الداخلي:', invoice.internalNumber || '', '', '', '', '', '', '', ''],
-        ['التاريخ:', invoice.issueDate || '', '', '', '', '', '', '', ''],
-        ['البائع:', invoice.sellerName || '', '', '', '', '', '', '', ''],
-        ['المشتري:', invoice.buyerName || '', '', '', '', '', '', '', ''],
-        ['', '', '', '', '', '', '', '', ''], // Empty row
+        // Invoice header information
+        ['معلومات الفاتورة', '', '', '', '', '', '', '', '', ''],
+        ['الرقم الإلكتروني:', invoice.electronicNumber || '', '', '', '', '', '', '', '', ''],
+        ['الرقم الداخلي:', invoice.internalNumber || '', '', '', '', '', '', '', '', ''],
+        ['التاريخ:', invoice.issueDate || '', '', '', '', '', '', '', '', ''],
+        ['البائع:', invoice.sellerName || '', '', '', '', '', '', '', '', ''],
+        ['المشتري:', invoice.buyerName || '', '', '', '', '', '', '', '', ''],
+        ['', '', '', '', '', '', '', '', '', ''],
         detailHeaders
       ];
       
-      // Add invoice line items if available
+      // Add invoice line items
       if (invoice.details && invoice.details.length > 0) {
         invoice.details.forEach(item => {
           detailRows.push([
-            item.description || item.codeName || '',           // A - اسم الصنف
-            item.unitCode || 'EA',                            // B - كود الوحدة
-            item.unitName || 'قطعة',                          // C - اسم الوحدة
-            item.quantity || '1',
-            item.unitName || 'قطعة',
-            this.formatCurrency(item.unitPrice),
-            this.formatCurrency(item.totalValue),
-            this.formatCurrency(item.taxAmount || '0'),       // G - الضريبة
-            this.formatCurrency(item.vatAmount),
-            this.formatCurrency(item.totalWithVat)            // I - الإجمالي
+            item.itemCode || '',                              // A - كود الصنف
+            item.description || '',                           // B - الوصف
+            item.unitCode || 'EA',                           // C - كود الوحدة
+            item.unitName || 'قطعة',                         // D - اسم الوحدة
+            item.quantity || '1',                            // E - الكمية
+            this.formatCurrency(item.unitPrice),             // F - السعر
+            this.formatCurrency(item.totalValue),            // G - القيمة
+            this.formatCurrency(item.taxAmount || '0'),      // H - الضريبة
+            this.formatCurrency(item.vatAmount),             // I - ضريبة القيمة المضافة
+            this.formatCurrency(item.totalWithVat || item.totalValue) // J - الإجمالي
           ]);
         });
       } else {
-        // Add summary row if no detailed items
         detailRows.push([
+          invoice.electronicNumber || '',
           'إجمالي قيمة الفاتورة',
           'EA',
           'فاتورة',
@@ -598,23 +602,23 @@ class ETAInvoiceExporter {
       const totalValue = invoice.invoiceValue || invoice.totalAmount || '0';
       const totalVat = invoice.vatAmount || '0';
       const grandTotal = invoice.totalAmount || '0';
-      const totalTax = '0'; // Default tax amount
       
       detailRows.push([
         '', '', '', '', 'الإجمالي:', 
         this.formatCurrency(totalValue),
-        this.formatCurrency(totalTax),
+        this.formatCurrency(totalValue),
+        '0',
         this.formatCurrency(totalVat),
         this.formatCurrency(grandTotal)
       ]);
       
-      // Add back link to main sheet
-      detailRows.push(['', '', '', '', '', '', '', '', '']);
-      detailRows.push(['العودة للقائمة الرئيسية', '', '', '', '', '', '', '', '']);
+      // Add back link
+      detailRows.push(['', '', '', '', '', '', '', '', '', '']);
+      detailRows.push(['العودة للقائمة الرئيسية', '', '', '', '', '', '', '', '', '']);
       
       const ws = XLSX.utils.aoa_to_sheet(detailRows);
       
-      // Add back link to main sheet
+      // Add back link
       const backLinkCell = XLSX.utils.encode_cell({ r: detailRows.length - 1, c: 0 });
       if (ws[backLinkCell]) {
         ws[backLinkCell].l = { 
@@ -626,7 +630,6 @@ class ETAInvoiceExporter {
         };
       }
       
-      // Format the details sheet
       this.formatDetailsWorksheet(ws, detailHeaders);
       
       XLSX.utils.book_append_sheet(wb, ws, sheetName);
@@ -636,11 +639,9 @@ class ETAInvoiceExporter {
   formatCurrency(value) {
     if (!value || value === '0' || value === '') return '';
     
-    // Remove any existing formatting and convert to number
     const numValue = parseFloat(value.toString().replace(/[,٬]/g, ''));
     if (isNaN(numValue)) return value;
     
-    // Format with commas for thousands
     return numValue.toLocaleString('en-US', { 
       minimumFractionDigits: 2, 
       maximumFractionDigits: 2 
@@ -648,12 +649,12 @@ class ETAInvoiceExporter {
   }
   
   formatMainWorksheet(ws, headers, dataLength) {
-    // Set column widths based on content
+    // Set column widths
     const colWidths = [
       { wch: 8 },   // A - تسلسل
       { wch: 10 },  // B - عرض
-      { wch: 15 },  // C - نوع الفاتورة
-      { wch: 8 },   // D - إصدار
+      { wch: 15 },  // C - نوع المستند
+      { wch: 8 },   // D - نسخة المستند
       { wch: 15 },  // E - الحالة
       { wch: 18 },  // F - تاريخ الإصدار
       { wch: 18 },  // G - تاريخ التقديم
@@ -663,12 +664,24 @@ class ETAInvoiceExporter {
       { wch: 20 },  // K - الخصم تحت حساب الضريبة
       { wch: 15 },  // L - إجمالي الفاتورة
       { wch: 20 },  // M - الرقم الداخلي
-      { wch: 30 }   // N - الرقم الإلكتروني
+      { wch: 30 },  // N - الرقم الإلكتروني
+      { wch: 20 },  // O - الرقم الضريبي للبائع
+      { wch: 25 },  // P - اسم البائع
+      { wch: 20 },  // Q - عنوان البائع
+      { wch: 20 },  // R - الرقم الضريبي للمشتري
+      { wch: 25 },  // S - اسم المشتري
+      { wch: 20 },  // T - عنوان المشتري
+      { wch: 20 },  // U - مرجع طلب الشراء
+      { wch: 20 },  // V - وصف طلب الشراء
+      { wch: 20 },  // W - مرجع طلب المبيعات
+      { wch: 18 },  // X - التوقيع الإلكتروني
+      { wch: 18 },  // Y - دليل الغذاء والدواء
+      { wch: 50 }   // Z - الرابط الخارجي
     ];
     
     ws['!cols'] = colWidths;
     
-    // Style the header row
+    // Style header row
     const range = XLSX.utils.decode_range(ws['!ref']);
     for (let col = range.s.c; col <= range.e.c; col++) {
       const cellAddress = XLSX.utils.encode_cell({ r: 0, c: col });
@@ -687,7 +700,7 @@ class ETAInvoiceExporter {
       };
     }
     
-    // Style data rows with alternating colors
+    // Style data rows
     for (let row = 1; row <= range.e.r; row++) {
       const isEvenRow = row % 2 === 0;
       const fillColor = isEvenRow ? "F8F9FA" : "FFFFFF";
@@ -711,24 +724,23 @@ class ETAInvoiceExporter {
   }
   
   formatDetailsWorksheet(ws, headers) {
-    // Set column widths for details sheet
     const colWidths = [
-      { wch: 35 }, // A - اسم الصنف (widest column)
-      { wch: 12 }, // B - كود الوحدة
-      { wch: 15 }, // C - اسم الوحدة
-      { wch: 10 }, // الكمية
-      { wch: 12 }, // السعر
-      { wch: 12 }, // القيمة
-      { wch: 12 }, // الضريبة
-      { wch: 15 }, // ضريبة القيمة المضافة
-      { wch: 12 }  // الإجمالي
+      { wch: 20 }, // A - كود الصنف
+      { wch: 35 }, // B - الوصف
+      { wch: 12 }, // C - كود الوحدة
+      { wch: 15 }, // D - اسم الوحدة
+      { wch: 10 }, // E - الكمية
+      { wch: 12 }, // F - السعر
+      { wch: 12 }, // G - القيمة
+      { wch: 12 }, // H - الضريبة
+      { wch: 15 }, // I - ضريبة القيمة المضافة
+      { wch: 12 }  // J - الإجمالي
     ];
     
     ws['!cols'] = colWidths;
     
-    // Style the header row (row 8, where detail headers start)
     const range = XLSX.utils.decode_range(ws['!ref']);
-    const headerRow = 7; // 0-indexed, so row 8
+    const headerRow = 7;
     
     for (let col = range.s.c; col <= range.e.c; col++) {
       const cellAddress = XLSX.utils.encode_cell({ r: headerRow, c: col });
@@ -747,8 +759,7 @@ class ETAInvoiceExporter {
       };
     }
     
-    // Add alternating row colors for data rows (starting from row 9)
-    for (let row = 8; row <= range.e.r - 2; row++) { // Exclude totals and back link rows
+    for (let row = 8; row <= range.e.r - 2; row++) {
       const isEvenRow = (row - 8) % 2 === 0;
       const fillColor = isEvenRow ? "F8F9FA" : "FFFFFF";
       
@@ -793,8 +804,6 @@ class ETAInvoiceExporter {
     ];
     
     const ws = XLSX.utils.aoa_to_sheet(statsData);
-    
-    // Format statistics sheet
     ws['!cols'] = [{ wch: 30 }, { wch: 20 }];
     
     XLSX.utils.book_append_sheet(wb, ws, 'الإحصائيات');
@@ -810,18 +819,15 @@ class ETAInvoiceExporter {
     };
     
     data.forEach(invoice => {
-      // Calculate totals
       const value = parseFloat(invoice.totalAmount?.replace(/[,٬]/g, '') || 0);
       const vat = parseFloat(invoice.vatAmount?.replace(/[,٬]/g, '') || 0);
       
       stats.totalValue += value;
       stats.totalVAT += vat;
       
-      // Count statuses
       const status = invoice.status || 'غير محدد';
       stats.statusCounts[status] = (stats.statusCounts[status] || 0) + 1;
       
-      // Count types
       const type = invoice.documentType || 'غير محدد';
       stats.typeCounts[type] = (stats.typeCounts[type] || 0) + 1;
     });
